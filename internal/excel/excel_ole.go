@@ -176,7 +176,7 @@ func (o *OleExcel) CopySheet(srcSheetName string, dstSheetName string) error {
 
 	srcSheetVariant, err := oleutil.GetProperty(worksheets, "Item", srcSheetName)
 	if err != nil {
-		return fmt.Errorf("faild to get sheet: %w", err)
+		return fmt.Errorf("failed to get sheet: %w", err)
 	}
 	srcSheet := srcSheetVariant.ToIDispatch()
 	defer srcSheet.Release()
@@ -228,7 +228,6 @@ func (o *OleWorksheet) GetTables() ([]Table, error) {
 		table := oleutil.MustGetProperty(tables, "Item", i).ToIDispatch()
 		defer table.Release()
 		name := oleutil.MustGetProperty(table, "Name").ToString()
-		defer table.Release()
 		tableRange := oleutil.MustGetProperty(table, "Range").ToIDispatch()
 		defer tableRange.Release()
 		tableList[i-1] = Table{
@@ -293,7 +292,7 @@ func (o *OleWorksheet) GetFormula(cell string) (string, error) {
 	return formula, nil
 }
 
-func (o *OleWorksheet) GetDimention() (string, error) {
+func (o *OleWorksheet) GetDimension() (string, error) {
 	range_ := oleutil.MustGetProperty(o.worksheet, "UsedRange").ToIDispatch()
 	defer range_.Release()
 	dimension := oleutil.MustGetProperty(range_, "Address").ToString()
@@ -301,7 +300,7 @@ func (o *OleWorksheet) GetDimention() (string, error) {
 }
 
 func (o *OleWorksheet) GetPagingStrategy(pageSize int) (PagingStrategy, error) {
-	return NewOlePagingStrategy(1000, o)
+	return NewOlePagingStrategy(pageSize, o)
 }
 
 func (o *OleWorksheet) PrintArea() (string, error) {

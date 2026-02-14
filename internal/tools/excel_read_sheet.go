@@ -99,7 +99,7 @@ func readSheet(fileAbsolutePath string, sheetName string, valueRange string, sho
 	// Find next paging range if current range matches a paging range
 	nextRange := pagingService.FindNextRange(allRanges, currentRange)
 	// Validate the current range against the used range
-	usedRange, err := worksheet.GetDimention()
+	usedRange, err := worksheet.GetDimension()
 	if err != nil {
 		return nil, err
 	}

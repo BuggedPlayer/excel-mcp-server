@@ -82,7 +82,7 @@ func describeSheets(fileAbsolutePath string) (*mcp.CallToolResult, error) {
 		if err != nil {
 			return nil, err
 		}
-		usedRange, err := sheet.GetDimention()
+		usedRange, err := sheet.GetDimension()
 		if err != nil {
 			return nil, err
 		}

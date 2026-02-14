@@ -24,7 +24,7 @@ func (e *ExcelizeExcel) GetBackendName() string {
 func (e *ExcelizeExcel) FindSheet(sheetName string) (Worksheet, error) {
 	index, err := e.file.GetSheetIndex(sheetName)
 	if err != nil {
-		return nil, fmt.Errorf("sheet not found: %s", sheetName)
+		return nil, fmt.Errorf("sheet not found: %s: %w", sheetName, err)
 	}
 	if index < 0 {
 		return nil, fmt.Errorf("sheet not found: %s", sheetName)
@@ -42,11 +42,11 @@ func (e *ExcelizeExcel) CreateNewSheet(sheetName string) error {
 
 func (e *ExcelizeExcel) CopySheet(srcSheetName string, destSheetName string) error {
 	srcIndex, err := e.file.GetSheetIndex(srcSheetName)
+	if err != nil {
+		return fmt.Errorf("source sheet not found: %s: %w", srcSheetName, err)
+	}
 	if srcIndex < 0 {
 		return fmt.Errorf("source sheet not found: %s", srcSheetName)
-	}
-	if err != nil {
-		return err
 	}
 	destIndex, err := e.file.NewSheet(destSheetName)
 	if err != nil {
@@ -151,7 +151,7 @@ func (w *ExcelizeWorksheet) SetFormula(cell string, formula string) error {
 func (w *ExcelizeWorksheet) GetValue(cell string) (string, error) {
 	value, err := w.file.GetCellValue(w.sheetName, cell)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to get cell value: %w", err)
 	}
 	if value == "" {
 		// try to get calculated value
@@ -181,7 +181,7 @@ func (w *ExcelizeWorksheet) GetFormula(cell string) (string, error) {
 	return formula, nil
 }
 
-func (w *ExcelizeWorksheet) GetDimention() (string, error) {
+func (w *ExcelizeWorksheet) GetDimension() (string, error) {
 	return w.file.GetSheetDimension(w.sheetName)
 }
 
@@ -544,7 +544,7 @@ func fillShadingNameToInt(shading FillShading) int {
 	return 0
 }
 
-// updateDimention updates the dimension of the worksheet after a cell is updated.
+// updateDimension updates the dimension of the worksheet after a cell is updated.
 func (w *ExcelizeWorksheet) updateDimension(updatedCell string) error {
 	dimension, err := w.file.GetSheetDimension(w.sheetName)
 	if err != nil {

@@ -9,10 +9,11 @@ import (
 	"github.com/xuri/excelize/v2"
 )
 
-// parseRange parses Excel's range string (e.g. A1:C10 or A1)
+var rangeRegexp = regexp.MustCompile(`^(\$?[A-Z]+\$?\d+)(?::(\$?[A-Z]+\$?\d+))?$`)
+
+// ParseRange parses Excel's range string (e.g. A1:C10 or A1)
 func ParseRange(rangeStr string) (int, int, int, int, error) {
-	re := regexp.MustCompile(`^(\$?[A-Z]+\$?\d+)(?::(\$?[A-Z]+\$?\d+))?$`)
-	matches := re.FindStringSubmatch(rangeStr)
+	matches := rangeRegexp.FindStringSubmatch(rangeStr)
 	if matches == nil {
 		return 0, 0, 0, 0, fmt.Errorf("invalid range format: %s", rangeStr)
 	}
@@ -34,13 +35,22 @@ func ParseRange(rangeStr string) (int, int, int, int, error) {
 }
 
 func NormalizeRange(rangeStr string) string {
-	startCol, startRow, endCol, endRow, _ := ParseRange(rangeStr)
-	startCell, _ := excelize.CoordinatesToCellName(startCol, startRow)
-	endCell, _ := excelize.CoordinatesToCellName(endCol, endRow)
+	startCol, startRow, endCol, endRow, err := ParseRange(rangeStr)
+	if err != nil {
+		return rangeStr
+	}
+	startCell, err := excelize.CoordinatesToCellName(startCol, startRow)
+	if err != nil {
+		return rangeStr
+	}
+	endCell, err := excelize.CoordinatesToCellName(endCol, endRow)
+	if err != nil {
+		return rangeStr
+	}
 	return fmt.Sprintf("%s:%s", startCell, endCell)
 }
 
-// FileIsNotReadable checks if a file is not writable
+// FileIsNotWritable checks if a file is not writable
 func FileIsNotWritable(absolutePath string) bool {
 	f, err := os.OpenFile(path.Clean(absolutePath), os.O_WRONLY, os.ModePerm)
 	if err != nil {

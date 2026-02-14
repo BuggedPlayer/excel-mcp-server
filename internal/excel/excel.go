@@ -36,8 +36,8 @@ type Worksheet interface {
 	GetValue(cell string) (string, error)
 	// GetFormula gets the formula from the specified cell.
 	GetFormula(cell string) (string, error)
-	// GetDimention gets the dimension of the worksheet.
-	GetDimention() (string, error)
+	// GetDimension gets the dimension of the worksheet.
+	GetDimension() (string, error)
 	// GetPagingStrategy returns the paging strategy for the worksheet.
 	// The pageSize parameter is used to determine the max size of each page.
 	GetPagingStrategy(pageSize int) (PagingStrategy, error)
