@@ -581,3 +581,331 @@ func (w *ExcelizeWorksheet) updateDimension(updatedCell string) error {
 	updatedDimension := fmt.Sprintf("%s:%s", startRange, endRange)
 	return w.file.SetSheetDimension(w.sheetName, updatedDimension)
 }
+
+func (e *ExcelizeExcel) DeleteSheet(sheetName string) error {
+	if err := e.file.DeleteSheet(sheetName); err != nil {
+		return fmt.Errorf("failed to delete sheet: %w", err)
+	}
+	return nil
+}
+
+func (e *ExcelizeExcel) RenameSheet(oldName, newName string) error {
+	if err := e.file.SetSheetName(oldName, newName); err != nil {
+		return fmt.Errorf("failed to rename sheet: %w", err)
+	}
+	return nil
+}
+
+func (w *ExcelizeWorksheet) MergeCells(mergeRange string) error {
+	startCol, startRow, endCol, endRow, err := ParseRange(mergeRange)
+	if err != nil {
+		return err
+	}
+	topLeft, err := excelize.CoordinatesToCellName(startCol, startRow)
+	if err != nil {
+		return err
+	}
+	bottomRight, err := excelize.CoordinatesToCellName(endCol, endRow)
+	if err != nil {
+		return err
+	}
+	return w.file.MergeCell(w.sheetName, topLeft, bottomRight)
+}
+
+func (w *ExcelizeWorksheet) UnmergeCells(mergeRange string) error {
+	startCol, startRow, endCol, endRow, err := ParseRange(mergeRange)
+	if err != nil {
+		return err
+	}
+	topLeft, err := excelize.CoordinatesToCellName(startCol, startRow)
+	if err != nil {
+		return err
+	}
+	bottomRight, err := excelize.CoordinatesToCellName(endCol, endRow)
+	if err != nil {
+		return err
+	}
+	return w.file.UnmergeCell(w.sheetName, topLeft, bottomRight)
+}
+
+func (w *ExcelizeWorksheet) SetColumnWidth(startCol, endCol string, width float64) error {
+	return w.file.SetColWidth(w.sheetName, startCol, endCol, width)
+}
+
+func (w *ExcelizeWorksheet) SetRowHeight(row int, height float64) error {
+	return w.file.SetRowHeight(w.sheetName, row, height)
+}
+
+func (w *ExcelizeWorksheet) InsertRows(row int, count int) error {
+	return w.file.InsertRows(w.sheetName, row, count)
+}
+
+func (w *ExcelizeWorksheet) DeleteRows(row int, count int) error {
+	for i := 0; i < count; i++ {
+		if err := w.file.RemoveRow(w.sheetName, row); err != nil {
+			return fmt.Errorf("failed to delete row %d: %w", row, err)
+		}
+	}
+	return nil
+}
+
+func (w *ExcelizeWorksheet) InsertColumns(column string, count int) error {
+	return w.file.InsertCols(w.sheetName, column, count)
+}
+
+func (w *ExcelizeWorksheet) DeleteColumns(column string, count int) error {
+	for i := 0; i < count; i++ {
+		if err := w.file.RemoveCol(w.sheetName, column); err != nil {
+			return fmt.Errorf("failed to delete column %s (iteration %d): %w", column, i+1, err)
+		}
+	}
+	return nil
+}
+
+func (w *ExcelizeWorksheet) AddChart(position string, chartType string, dataRange string, title string) error {
+	ct := mapExcelizeChartType(chartType)
+	chart := &excelize.Chart{
+		Type: ct,
+		Series: []excelize.ChartSeries{
+			{
+				Name:   "",
+				Values: dataRange,
+			},
+		},
+		Title: []excelize.RichTextRun{{Text: title}},
+	}
+	return w.file.AddChart(w.sheetName, position, chart)
+}
+
+func mapExcelizeChartType(chartType string) excelize.ChartType {
+	switch chartType {
+	case "col":
+		return excelize.Col
+	case "bar":
+		return excelize.Bar
+	case "line":
+		return excelize.Line
+	case "pie":
+		return excelize.Pie
+	case "area":
+		return excelize.Area
+	case "scatter":
+		return excelize.Scatter
+	default:
+		return excelize.Col
+	}
+}
+
+func (w *ExcelizeWorksheet) FreezePanes(cell string) error {
+	col, row, err := excelize.CellNameToCoordinates(cell)
+	if err != nil {
+		return err
+	}
+	return w.file.SetPanes(w.sheetName, &excelize.Panes{
+		Freeze:      true,
+		Split:       false,
+		XSplit:      col - 1,
+		YSplit:      row - 1,
+		TopLeftCell: cell,
+		ActivePane:  "bottomRight",
+	})
+}
+
+func (w *ExcelizeWorksheet) AddDataValidation(validationRange string, validationType string, formula1 string, formula2 string, allowBlank bool) error {
+	dv := excelize.NewDataValidation(allowBlank)
+	dv.Sqref = validationRange
+	switch validationType {
+	case "list":
+		dv.SetDropList(strings.Split(formula1, ","))
+	case "whole":
+		dv.SetRange(formula1, formula2, excelize.DataValidationTypeWhole, excelize.DataValidationOperatorBetween)
+	case "decimal":
+		dv.SetRange(formula1, formula2, excelize.DataValidationTypeDecimal, excelize.DataValidationOperatorBetween)
+	default:
+		return fmt.Errorf("unsupported validation type: %s", validationType)
+	}
+	return w.file.AddDataValidation(w.sheetName, dv)
+}
+
+func (w *ExcelizeWorksheet) FindReplace(searchRange string, find string, replace string, matchCase bool, matchEntireCell bool) (int, error) {
+	rangeStr := searchRange
+	if rangeStr == "" {
+		dim, err := w.GetDimension()
+		if err != nil {
+			return 0, err
+		}
+		rangeStr = dim
+	}
+	startCol, startRow, endCol, endRow, err := ParseRange(rangeStr)
+	if err != nil {
+		return 0, err
+	}
+	count := 0
+	for row := startRow; row <= endRow; row++ {
+		for col := startCol; col <= endCol; col++ {
+			cell, err := excelize.CoordinatesToCellName(col, row)
+			if err != nil {
+				continue
+			}
+			value, err := w.file.GetCellValue(w.sheetName, cell)
+			if err != nil || value == "" {
+				continue
+			}
+			var newValue string
+			var matched bool
+			if matchEntireCell {
+				if matchCase {
+					matched = value == find
+				} else {
+					matched = strings.EqualFold(value, find)
+				}
+				if matched {
+					newValue = replace
+				}
+			} else {
+				if matchCase {
+					if strings.Contains(value, find) {
+						newValue = strings.ReplaceAll(value, find, replace)
+						matched = true
+					}
+				} else {
+					lower := strings.ToLower(value)
+					lowerFind := strings.ToLower(find)
+					if strings.Contains(lower, lowerFind) {
+						// Case-insensitive replace
+						result := value
+						idx := 0
+						for {
+							pos := strings.Index(strings.ToLower(result[idx:]), lowerFind)
+							if pos < 0 {
+								break
+							}
+							result = result[:idx+pos] + replace + result[idx+pos+len(find):]
+							idx = idx + pos + len(replace)
+						}
+						newValue = result
+						matched = true
+					}
+				}
+			}
+			if matched {
+				if err := w.file.SetCellValue(w.sheetName, cell, newValue); err != nil {
+					return count, err
+				}
+				count++
+			}
+		}
+	}
+	return count, nil
+}
+
+func (w *ExcelizeWorksheet) AddComment(cell string, author string, text string) error {
+	return w.file.AddComment(w.sheetName, excelize.Comment{
+		Cell:   cell,
+		Author: author,
+		Text:   text,
+	})
+}
+
+func (w *ExcelizeWorksheet) GetComments() ([]Comment, error) {
+	comments, err := w.file.GetComments(w.sheetName)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]Comment, len(comments))
+	for i, c := range comments {
+		result[i] = Comment{Cell: c.Cell, Author: c.Author, Text: c.Text}
+	}
+	return result, nil
+}
+
+func (w *ExcelizeWorksheet) AddHyperlink(cell string, url string, display string) error {
+	linkType := "External"
+	if strings.Contains(url, "!") && !strings.HasPrefix(url, "http") {
+		linkType = "Location"
+	}
+	opts := excelize.HyperlinkOpts{}
+	if display != "" {
+		opts.Display = &display
+	}
+	if err := w.file.SetCellHyperLink(w.sheetName, cell, url, linkType, opts); err != nil {
+		return err
+	}
+	if display != "" {
+		return w.file.SetCellValue(w.sheetName, cell, display)
+	}
+	return nil
+}
+
+func (w *ExcelizeWorksheet) SetConditionalFormat(formatRange string, ruleType string, criteria string, value string, value2 string, fontColor string, bgColor string) error {
+	opt := excelize.ConditionalFormatOptions{}
+
+	switch ruleType {
+	case "cell":
+		opt.Type = "cell"
+		opt.Criteria = criteria
+		opt.Value = value
+		if value2 != "" {
+			opt.MinValue = value
+			opt.MaxValue = value2
+		}
+	case "top":
+		opt.Type = "top"
+		opt.Criteria = criteria
+		opt.Value = value
+	case "duplicate":
+		opt.Type = "duplicate"
+	case "colorScale":
+		opt.Type = "2_color_scale"
+		if value != "" {
+			opt.MinValue = value
+		}
+		if value2 != "" {
+			opt.MaxValue = value2
+		}
+	case "dataBar":
+		opt.Type = "data_bar"
+		if value != "" {
+			opt.MinValue = value
+		}
+		if value2 != "" {
+			opt.MaxValue = value2
+		}
+	default:
+		return fmt.Errorf("unsupported conditional format type: %s", ruleType)
+	}
+
+	if fontColor != "" || bgColor != "" {
+		style := &excelize.Style{}
+		if fontColor != "" {
+			style.Font = &excelize.Font{Color: fontColor}
+		}
+		if bgColor != "" {
+			style.Fill = excelize.Fill{Type: "pattern", Pattern: 1, Color: []string{bgColor}}
+		}
+		styleID, err := w.file.NewConditionalStyle(style)
+		if err != nil {
+			return fmt.Errorf("failed to create conditional style: %w", err)
+		}
+		opt.Format = &styleID
+	}
+
+	return w.file.SetConditionalFormat(w.sheetName, formatRange, []excelize.ConditionalFormatOptions{opt})
+}
+
+func (e *ExcelizeExcel) SetDefinedName(name string, refersTo string, scope string) error {
+	return e.file.SetDefinedName(&excelize.DefinedName{
+		Name:     name,
+		RefersTo: refersTo,
+		Scope:    scope,
+	})
+}
+
+func (e *ExcelizeExcel) GetDefinedNames() ([]DefinedName, error) {
+	names := e.file.GetDefinedName()
+	result := make([]DefinedName, len(names))
+	for i, n := range names {
+		result[i] = DefinedName{Name: n.Name, RefersTo: n.RefersTo, Scope: n.Scope}
+	}
+	return result, nil
+}

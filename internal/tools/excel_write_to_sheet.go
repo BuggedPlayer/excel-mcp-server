@@ -70,7 +70,7 @@ func AddExcelWriteToSheetTool(server *server.MCPServer) {
 				},
 			}),
 		),
-	), handleWriteToSheet)
+	), WithRecovery(handleWriteToSheet))
 }
 
 func handleWriteToSheet(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {

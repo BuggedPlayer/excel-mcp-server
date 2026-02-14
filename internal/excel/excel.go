@@ -1,6 +1,8 @@
 package excel
 
 import (
+	"os"
+
 	"github.com/xuri/excelize/v2"
 )
 
@@ -15,6 +17,14 @@ type Excel interface {
 	CreateNewSheet(sheetName string) error
 	// CopySheet copies a sheet from one to another.
 	CopySheet(srcSheetName, destSheetName string) error
+	// DeleteSheet deletes a sheet by its name.
+	DeleteSheet(sheetName string) error
+	// RenameSheet renames a sheet from oldName to newName.
+	RenameSheet(oldName, newName string) error
+	// SetDefinedName creates or updates a named range in the workbook.
+	SetDefinedName(name string, refersTo string, scope string) error
+	// GetDefinedNames returns all defined names in the workbook.
+	GetDefinedNames() ([]DefinedName, error)
 	// Save saves the Excel file.
 	Save() error
 }
@@ -49,6 +59,38 @@ type Worksheet interface {
 	GetCellStyle(cell string) (*CellStyle, error)
 	// SetCellStyle sets style for the specified cell.
 	SetCellStyle(cell string, style *CellStyle) error
+	// MergeCells merges cells in the specified range.
+	MergeCells(mergeRange string) error
+	// UnmergeCells unmerges cells in the specified range.
+	UnmergeCells(mergeRange string) error
+	// SetColumnWidth sets the width of columns in the specified range.
+	SetColumnWidth(startCol, endCol string, width float64) error
+	// SetRowHeight sets the height of the specified row.
+	SetRowHeight(row int, height float64) error
+	// InsertRows inserts empty rows at the specified position.
+	InsertRows(row int, count int) error
+	// DeleteRows deletes rows at the specified position.
+	DeleteRows(row int, count int) error
+	// InsertColumns inserts empty columns at the specified position.
+	InsertColumns(column string, count int) error
+	// DeleteColumns deletes columns at the specified position.
+	DeleteColumns(column string, count int) error
+	// AddChart adds a chart to the worksheet.
+	AddChart(position string, chartType string, dataRange string, title string) error
+	// FreezePanes freezes rows and columns at the specified cell.
+	FreezePanes(cell string) error
+	// AddDataValidation adds a data validation rule to the specified range.
+	AddDataValidation(validationRange string, validationType string, formula1 string, formula2 string, allowBlank bool) error
+	// FindReplace finds and replaces values in the worksheet. Returns the number of replacements made.
+	FindReplace(searchRange string, find string, replace string, matchCase bool, matchEntireCell bool) (int, error)
+	// AddComment adds a comment to the specified cell.
+	AddComment(cell string, author string, text string) error
+	// GetComments returns all comments in the worksheet.
+	GetComments() ([]Comment, error)
+	// AddHyperlink adds a hyperlink to the specified cell.
+	AddHyperlink(cell string, url string, display string) error
+	// SetConditionalFormat applies conditional formatting to the specified range.
+	SetConditionalFormat(formatRange string, ruleType string, criteria string, value string, value2 string, fontColor string, bgColor string) error
 }
 
 type Table struct {
@@ -59,6 +101,18 @@ type Table struct {
 type PivotTable struct {
 	Name  string
 	Range string
+}
+
+type Comment struct {
+	Cell   string
+	Author string
+	Text   string
+}
+
+type DefinedName struct {
+	Name     string
+	RefersTo string
+	Scope    string
 }
 
 type CellStyle struct {
@@ -95,6 +149,7 @@ type FillStyle struct {
 // OpenFile opens an Excel file and returns an Excel interface.
 // It first tries to open the file using OLE automation, and if that fails,
 // it tries to using the excelize library.
+// If the file does not exist, it creates a new file using excelize.
 func OpenFile(absoluteFilePath string) (Excel, func(), error) {
 	ole, releaseFn, err := NewExcelOle(absoluteFilePath)
 	if err == nil {
@@ -103,10 +158,19 @@ func OpenFile(absoluteFilePath string) (Excel, func(), error) {
 	// If OLE fails, try Excelize
 	workbook, err := excelize.OpenFile(absoluteFilePath)
 	if err != nil {
+		// If the file does not exist, create a new one
+		if os.IsNotExist(err) {
+			workbook = excelize.NewFile()
+			workbook.Path = absoluteFilePath
+			e := NewExcelizeExcel(workbook)
+			return e, func() {
+				workbook.Close()
+			}, nil
+		}
 		return nil, func() {}, err
 	}
-	excelize := NewExcelizeExcel(workbook)
-	return excelize, func() {
+	e := NewExcelizeExcel(workbook)
+	return e, func() {
 		workbook.Close()
 	}, nil
 }

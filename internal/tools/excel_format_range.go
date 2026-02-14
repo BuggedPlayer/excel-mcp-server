@@ -170,7 +170,7 @@ func AddExcelFormatRangeTool(server *server.MCPServer) {
 				},
 			}),
 		),
-	), handleFormatRange)
+	), WithRecovery(handleFormatRange))
 }
 
 func handleFormatRange(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {

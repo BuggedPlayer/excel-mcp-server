@@ -14,6 +14,7 @@ import (
 	"github.com/go-ole/go-ole"
 	"github.com/go-ole/go-ole/oleutil"
 	"github.com/skanehira/clipboard-image"
+	"github.com/xuri/excelize/v2"
 )
 
 type OleExcel struct {
@@ -38,10 +39,22 @@ func NewExcelOle(absolutePath string) (*OleExcel, func(), error) {
 	if err != nil {
 		return nil, func() {}, err
 	}
-	oleutil.MustPutProperty(excel, "ScreenUpdating", false)
-	oleutil.MustPutProperty(excel, "EnableEvents", false)
-	workbooks := oleutil.MustGetProperty(excel, "Workbooks").ToIDispatch()
-	c := oleutil.MustGetProperty(workbooks, "Count").Val
+	if _, err := oleutil.PutProperty(excel, "ScreenUpdating", false); err != nil {
+		return nil, func() {}, fmt.Errorf("failed to set ScreenUpdating: %w", err)
+	}
+	if _, err := oleutil.PutProperty(excel, "EnableEvents", false); err != nil {
+		return nil, func() {}, fmt.Errorf("failed to set EnableEvents: %w", err)
+	}
+	workbooksProp, err := oleutil.GetProperty(excel, "Workbooks")
+	if err != nil {
+		return nil, func() {}, fmt.Errorf("failed to get Workbooks: %w", err)
+	}
+	workbooks := workbooksProp.ToIDispatch()
+	countProp, err := oleutil.GetProperty(workbooks, "Count")
+	if err != nil {
+		return nil, func() {}, fmt.Errorf("failed to get Workbooks.Count: %w", err)
+	}
+	c := countProp.Val
 	for i := 1; i <= int(c); i++ {
 		workbook := oleutil.MustGetProperty(workbooks, "Item", i).ToIDispatch()
 		fullName := oleutil.MustGetProperty(workbook, "FullName").ToString()
@@ -810,4 +823,344 @@ func normalizePath(path string) string {
 	}
 	rest := path[len(vol):]
 	return filepath.Clean(strings.ToUpper(vol) + rest)
+}
+
+func (o *OleExcel) DeleteSheet(sheetName string) error {
+	worksheets := oleutil.MustGetProperty(o.workbook, "Worksheets").ToIDispatch()
+	defer worksheets.Release()
+	sheetVariant, err := oleutil.GetProperty(worksheets, "Item", sheetName)
+	if err != nil {
+		return fmt.Errorf("sheet not found: %s: %w", sheetName, err)
+	}
+	sheet := sheetVariant.ToIDispatch()
+	defer sheet.Release()
+	oleutil.PutProperty(o.application, "DisplayAlerts", false)
+	defer oleutil.PutProperty(o.application, "DisplayAlerts", true)
+	_, err = oleutil.CallMethod(sheet, "Delete")
+	return err
+}
+
+func (o *OleExcel) RenameSheet(oldName, newName string) error {
+	worksheets := oleutil.MustGetProperty(o.workbook, "Worksheets").ToIDispatch()
+	defer worksheets.Release()
+	sheetVariant, err := oleutil.GetProperty(worksheets, "Item", oldName)
+	if err != nil {
+		return fmt.Errorf("sheet not found: %s: %w", oldName, err)
+	}
+	sheet := sheetVariant.ToIDispatch()
+	defer sheet.Release()
+	_, err = oleutil.PutProperty(sheet, "Name", newName)
+	return err
+}
+
+func (o *OleWorksheet) MergeCells(mergeRange string) error {
+	rng := oleutil.MustGetProperty(o.worksheet, "Range", mergeRange).ToIDispatch()
+	defer rng.Release()
+	_, err := oleutil.CallMethod(rng, "Merge")
+	return err
+}
+
+func (o *OleWorksheet) UnmergeCells(mergeRange string) error {
+	rng := oleutil.MustGetProperty(o.worksheet, "Range", mergeRange).ToIDispatch()
+	defer rng.Release()
+	_, err := oleutil.CallMethod(rng, "UnMerge")
+	return err
+}
+
+func (o *OleWorksheet) SetColumnWidth(startCol, endCol string, width float64) error {
+	rangeStr := startCol + ":" + endCol
+	columns := oleutil.MustGetProperty(o.worksheet, "Columns", rangeStr).ToIDispatch()
+	defer columns.Release()
+	_, err := oleutil.PutProperty(columns, "ColumnWidth", width)
+	return err
+}
+
+func (o *OleWorksheet) SetRowHeight(row int, height float64) error {
+	rowRange := oleutil.MustGetProperty(o.worksheet, "Rows", row).ToIDispatch()
+	defer rowRange.Release()
+	_, err := oleutil.PutProperty(rowRange, "RowHeight", height)
+	return err
+}
+
+func (o *OleWorksheet) InsertRows(row int, count int) error {
+	for i := 0; i < count; i++ {
+		rowRange := oleutil.MustGetProperty(o.worksheet, "Rows", row).ToIDispatch()
+		entireRow := oleutil.MustGetProperty(rowRange, "EntireRow").ToIDispatch()
+		_, err := oleutil.CallMethod(entireRow, "Insert")
+		entireRow.Release()
+		rowRange.Release()
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (o *OleWorksheet) DeleteRows(row int, count int) error {
+	rangeStr := fmt.Sprintf("%d:%d", row, row+count-1)
+	rowRange := oleutil.MustGetProperty(o.worksheet, "Rows", rangeStr).ToIDispatch()
+	defer rowRange.Release()
+	_, err := oleutil.CallMethod(rowRange, "Delete")
+	return err
+}
+
+func (o *OleWorksheet) InsertColumns(column string, count int) error {
+	for i := 0; i < count; i++ {
+		colRange := oleutil.MustGetProperty(o.worksheet, "Columns", column).ToIDispatch()
+		entireCol := oleutil.MustGetProperty(colRange, "EntireColumn").ToIDispatch()
+		_, err := oleutil.CallMethod(entireCol, "Insert")
+		entireCol.Release()
+		colRange.Release()
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (o *OleWorksheet) DeleteColumns(column string, count int) error {
+	colNum, err := excelize.ColumnNameToNumber(column)
+	if err != nil {
+		return err
+	}
+	endColName, err := excelize.ColumnNumberToName(colNum + count - 1)
+	if err != nil {
+		return err
+	}
+	rangeStr := column + ":" + endColName
+	colRange := oleutil.MustGetProperty(o.worksheet, "Columns", rangeStr).ToIDispatch()
+	defer colRange.Release()
+	_, err = oleutil.CallMethod(colRange, "Delete")
+	return err
+}
+
+func (o *OleWorksheet) AddChart(position string, chartType string, dataRange string, title string) error {
+	chartObjects := oleutil.MustGetProperty(o.worksheet, "ChartObjects").ToIDispatch()
+	defer chartObjects.Release()
+	chartObj, err := oleutil.CallMethod(chartObjects, "Add", 100, 100, 400, 300)
+	if err != nil {
+		return fmt.Errorf("failed to create chart object: %w", err)
+	}
+	co := chartObj.ToIDispatch()
+	defer co.Release()
+	chart := oleutil.MustGetProperty(co, "Chart").ToIDispatch()
+	defer chart.Release()
+	oleutil.PutProperty(chart, "ChartType", mapOleChartType(chartType))
+	rng := oleutil.MustGetProperty(o.worksheet, "Range", dataRange).ToIDispatch()
+	defer rng.Release()
+	oleutil.CallMethod(chart, "SetSourceData", rng)
+	if title != "" {
+		oleutil.PutProperty(chart, "HasTitle", true)
+		chartTitle := oleutil.MustGetProperty(chart, "ChartTitle").ToIDispatch()
+		defer chartTitle.Release()
+		oleutil.PutProperty(chartTitle, "Text", title)
+	}
+	return nil
+}
+
+func mapOleChartType(chartType string) int {
+	switch chartType {
+	case "col":
+		return 51 // xlColumnClustered
+	case "bar":
+		return 57 // xlBarClustered
+	case "line":
+		return 4 // xlLine
+	case "pie":
+		return 5 // xlPie
+	case "area":
+		return 1 // xlArea
+	case "scatter":
+		return -4169 // xlXYScatter
+	default:
+		return 51
+	}
+}
+
+func (o *OleWorksheet) FreezePanes(cell string) error {
+	oleutil.CallMethod(o.worksheet, "Activate")
+	rng := oleutil.MustGetProperty(o.worksheet, "Range", cell).ToIDispatch()
+	defer rng.Release()
+	oleutil.CallMethod(rng, "Select")
+	window := oleutil.MustGetProperty(o.excel.application, "ActiveWindow").ToIDispatch()
+	defer window.Release()
+	oleutil.PutProperty(window, "FreezePanes", false)
+	_, err := oleutil.PutProperty(window, "FreezePanes", true)
+	return err
+}
+
+func (o *OleWorksheet) AddDataValidation(validationRange string, validationType string, formula1 string, formula2 string, allowBlank bool) error {
+	rng := oleutil.MustGetProperty(o.worksheet, "Range", validationRange).ToIDispatch()
+	defer rng.Release()
+	validation := oleutil.MustGetProperty(rng, "Validation").ToIDispatch()
+	defer validation.Release()
+	oleutil.CallMethod(validation, "Delete")
+	xlType := mapOleValidationType(validationType)
+	_, err := oleutil.CallMethod(validation, "Add", xlType, 1 /*xlBetween*/, 1 /*xlAlertStop*/, formula1, formula2)
+	return err
+}
+
+func mapOleValidationType(validationType string) int {
+	switch validationType {
+	case "list":
+		return 3 // xlValidateList
+	case "whole":
+		return 1 // xlValidateWholeNumber
+	case "decimal":
+		return 2 // xlValidateDecimal
+	default:
+		return 3
+	}
+}
+
+func (o *OleWorksheet) FindReplace(searchRange string, find string, replace string, matchCase bool, matchEntireCell bool) (int, error) {
+	var rng *ole.IDispatch
+	if searchRange != "" {
+		rng = oleutil.MustGetProperty(o.worksheet, "Range", searchRange).ToIDispatch()
+	} else {
+		rng = oleutil.MustGetProperty(o.worksheet, "Cells").ToIDispatch()
+	}
+	defer rng.Release()
+	lookAt := 2 // xlPart
+	if matchEntireCell {
+		lookAt = 1 // xlWhole
+	}
+	result, err := oleutil.CallMethod(rng, "Replace", find, replace, lookAt, 1 /*xlByRows*/, matchCase)
+	if err != nil {
+		return 0, err
+	}
+	if result.Value().(bool) {
+		return -1, nil // OLE Replace doesn't return count
+	}
+	return 0, nil
+}
+
+func (o *OleWorksheet) AddComment(cell string, author string, text string) error {
+	rng := oleutil.MustGetProperty(o.worksheet, "Range", cell).ToIDispatch()
+	defer rng.Release()
+	// Delete existing comment if any
+	existingComment, err := oleutil.GetProperty(rng, "Comment")
+	if err == nil && existingComment.VT != ole.VT_NULL && existingComment.VT != ole.VT_EMPTY {
+		c := existingComment.ToIDispatch()
+		oleutil.CallMethod(c, "Delete")
+		c.Release()
+	}
+	_, err = oleutil.CallMethod(rng, "AddComment", text)
+	return err
+}
+
+func (o *OleWorksheet) GetComments() ([]Comment, error) {
+	comments := oleutil.MustGetProperty(o.worksheet, "Comments").ToIDispatch()
+	defer comments.Release()
+	count := int(oleutil.MustGetProperty(comments, "Count").Val)
+	result := make([]Comment, count)
+	for i := 1; i <= count; i++ {
+		comment := oleutil.MustGetProperty(comments, "Item", i).ToIDispatch()
+		parent := oleutil.MustGetProperty(comment, "Parent").ToIDispatch()
+		addr := oleutil.MustGetProperty(parent, "Address").ToString()
+		authorStr := oleutil.MustGetProperty(comment, "Author").ToString()
+		textStr := oleutil.MustGetProperty(comment, "Text").ToString()
+		parent.Release()
+		comment.Release()
+		result[i-1] = Comment{Cell: NormalizeRange(addr), Author: authorStr, Text: textStr}
+	}
+	return result, nil
+}
+
+func (o *OleWorksheet) AddHyperlink(cell string, url string, display string) error {
+	hyperlinks := oleutil.MustGetProperty(o.worksheet, "Hyperlinks").ToIDispatch()
+	defer hyperlinks.Release()
+	rng := oleutil.MustGetProperty(o.worksheet, "Range", cell).ToIDispatch()
+	defer rng.Release()
+	displayText := display
+	if displayText == "" {
+		displayText = url
+	}
+	_, err := oleutil.CallMethod(hyperlinks, "Add", rng, url, nil, nil, displayText)
+	return err
+}
+
+func (o *OleWorksheet) SetConditionalFormat(formatRange string, ruleType string, criteria string, value string, value2 string, fontColor string, bgColor string) error {
+	rng := oleutil.MustGetProperty(o.worksheet, "Range", formatRange).ToIDispatch()
+	defer rng.Release()
+	fcs := oleutil.MustGetProperty(rng, "FormatConditions").ToIDispatch()
+	defer fcs.Release()
+
+	switch ruleType {
+	case "cell":
+		operator := mapOleCriteriaOperator(criteria)
+		var fc *ole.VARIANT
+		var err error
+		if value2 != "" {
+			fc, err = oleutil.CallMethod(fcs, "Add", 1 /*xlCellValue*/, operator, value, value2)
+		} else {
+			fc, err = oleutil.CallMethod(fcs, "Add", 1 /*xlCellValue*/, operator, value)
+		}
+		if err != nil {
+			return err
+		}
+		condition := fc.ToIDispatch()
+		defer condition.Release()
+		if fontColor != "" {
+			font := oleutil.MustGetProperty(condition, "Font").ToIDispatch()
+			defer font.Release()
+			oleutil.PutProperty(font, "Color", rgbToBgr(fontColor))
+		}
+		if bgColor != "" {
+			interior := oleutil.MustGetProperty(condition, "Interior").ToIDispatch()
+			defer interior.Release()
+			oleutil.PutProperty(interior, "Color", rgbToBgr(bgColor))
+		}
+	case "duplicate":
+		_, err := oleutil.CallMethod(fcs, "AddUniqueValues")
+		if err != nil {
+			return err
+		}
+	default:
+		return fmt.Errorf("unsupported conditional format type for OLE: %s", ruleType)
+	}
+	return nil
+}
+
+func mapOleCriteriaOperator(criteria string) int {
+	switch criteria {
+	case ">":
+		return 5 // xlGreater
+	case "<":
+		return 6 // xlLess
+	case ">=":
+		return 7 // xlGreaterEqual
+	case "<=":
+		return 8 // xlLessEqual
+	case "==":
+		return 3 // xlEqual
+	case "!=":
+		return 4 // xlNotEqual
+	case "between":
+		return 1 // xlBetween
+	default:
+		return 3 // xlEqual
+	}
+}
+
+func (o *OleExcel) SetDefinedName(name string, refersTo string, scope string) error {
+	names := oleutil.MustGetProperty(o.workbook, "Names").ToIDispatch()
+	defer names.Release()
+	_, err := oleutil.CallMethod(names, "Add", name, "="+refersTo)
+	return err
+}
+
+func (o *OleExcel) GetDefinedNames() ([]DefinedName, error) {
+	names := oleutil.MustGetProperty(o.workbook, "Names").ToIDispatch()
+	defer names.Release()
+	count := int(oleutil.MustGetProperty(names, "Count").Val)
+	result := make([]DefinedName, count)
+	for i := 1; i <= count; i++ {
+		name := oleutil.MustGetProperty(names, "Item", i).ToIDispatch()
+		nameStr := oleutil.MustGetProperty(name, "Name").ToString()
+		refersToStr := oleutil.MustGetProperty(name, "RefersTo").ToString()
+		name.Release()
+		result[i-1] = DefinedName{Name: nameStr, RefersTo: refersToStr}
+	}
+	return result, nil
 }

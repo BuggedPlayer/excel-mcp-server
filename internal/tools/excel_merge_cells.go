@@ -12,50 +12,45 @@ import (
 	imcp "github.com/negokaz/excel-mcp-server/internal/mcp"
 )
 
-type ExcelCreateTableArguments struct {
+type ExcelMergeCellsArguments struct {
 	FileAbsolutePath string `zog:"fileAbsolutePath"`
 	SheetName        string `zog:"sheetName"`
 	Range            string `zog:"range"`
-	TableName        string `zog:"tableName"`
 }
 
-var excelCreateTableArgumentsSchema = z.Struct(z.Shape{
+var excelMergeCellsArgumentsSchema = z.Struct(z.Shape{
 	"fileAbsolutePath": z.String().Test(AbsolutePathTest()).Required(),
 	"sheetName":        z.String().Required(),
-	"range":            z.String(),
-	"tableName":        z.String().Required(),
+	"range":            z.String().Required(),
 })
 
-func AddExcelCreateTableTool(server *server.MCPServer) {
-	server.AddTool(mcp.NewTool("excel_create_table",
-		mcp.WithDescription("Create a table in the Excel sheet"),
+func AddExcelMergeCellsTool(server *server.MCPServer) {
+	server.AddTool(mcp.NewTool("excel_merge_cells",
+		mcp.WithDescription("Merge cells in the specified range"),
 		mcp.WithString("fileAbsolutePath",
 			mcp.Required(),
 			mcp.Description("Absolute path to the Excel file"),
 		),
 		mcp.WithString("sheetName",
 			mcp.Required(),
-			mcp.Description("Sheet name where the table is created"),
+			mcp.Description("Sheet name in the Excel file"),
 		),
 		mcp.WithString("range",
-			mcp.Description("Range to be a table (e.g., \"A1:C10\")"),
-		),
-		mcp.WithString("tableName",
 			mcp.Required(),
-			mcp.Description("Table name to be created"),
+			mcp.Description("Range of cells to merge (e.g., \"A1:C3\")"),
 		),
-	), WithRecovery(handleCreateTable))
+	), WithRecovery(handleMergeCells))
 }
 
-func handleCreateTable(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	args := ExcelCreateTableArguments{}
-	if issues := excelCreateTableArgumentsSchema.Parse(request.Params.Arguments, &args); len(issues) != 0 {
+func handleMergeCells(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	args := ExcelMergeCellsArguments{}
+	if issues := excelMergeCellsArgumentsSchema.Parse(request.Params.Arguments, &args); len(issues) != 0 {
 		return imcp.NewToolResultZogIssueMap(issues), nil
 	}
-	return createTable(args.FileAbsolutePath, args.SheetName, args.Range, args.TableName)
+	return mergeCells(args.FileAbsolutePath, args.SheetName, args.Range)
 }
 
-func createTable(fileAbsolutePath string, sheetName string, tableRange string, tableName string) (*mcp.CallToolResult, error) {
+func mergeCells(fileAbsolutePath string, sheetName string, mergeRange string) (*mcp.CallToolResult, error) {
 	workbook, release, err := excel.OpenFile(fileAbsolutePath)
 	if err != nil {
 		return nil, err
@@ -67,7 +62,8 @@ func createTable(fileAbsolutePath string, sheetName string, tableRange string, t
 		return imcp.NewToolResultInvalidArgumentError(err.Error()), nil
 	}
 	defer worksheet.Release()
-	if err := worksheet.AddTable(tableRange, tableName); err != nil {
+
+	if err := worksheet.MergeCells(mergeRange); err != nil {
 		return nil, err
 	}
 	if err := workbook.Save(); err != nil {
@@ -76,6 +72,6 @@ func createTable(fileAbsolutePath string, sheetName string, tableRange string, t
 
 	result := "# Notice\n"
 	result += fmt.Sprintf("backend: %s\n", workbook.GetBackendName())
-	result += fmt.Sprintf("Table [%s] created.\n", html.EscapeString(tableName))
+	result += fmt.Sprintf("Cells [%s] merged in sheet [%s].\n", mergeRange, html.EscapeString(sheetName))
 	return mcp.NewToolResultText(result), nil
 }

@@ -26,7 +26,7 @@ func AddExcelDescribeSheetsTool(server *server.MCPServer) {
 			mcp.Required(),
 			mcp.Description("Absolute path to the Excel file"),
 		),
-	), handleDescribeSheets)
+	), WithRecovery(handleDescribeSheets))
 }
 
 func handleDescribeSheets(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {

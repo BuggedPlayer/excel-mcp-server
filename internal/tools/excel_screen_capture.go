@@ -37,7 +37,7 @@ func AddExcelScreenCaptureTool(server *server.MCPServer) {
 		mcp.WithString("range",
 			mcp.Description("Range of cells to read in the Excel sheet (e.g., \"A1:C10\"). [default: first paging range]"),
 		),
-	), handleScreenCapture)
+	), WithRecovery(handleScreenCapture))
 }
 
 func handleScreenCapture(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {

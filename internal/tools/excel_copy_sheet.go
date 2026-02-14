@@ -39,7 +39,7 @@ func AddExcelCopySheetTool(server *server.MCPServer) {
 			mcp.Required(),
 			mcp.Description("Sheet name to be copied"),
 		),
-	), handleCopySheet)
+	), WithRecovery(handleCopySheet))
 }
 
 func handleCopySheet(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {

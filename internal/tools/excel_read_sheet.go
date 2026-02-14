@@ -48,7 +48,7 @@ func AddExcelReadSheetTool(server *server.MCPServer) {
 		mcp.WithBoolean("showStyle",
 			mcp.Description("Show style information for cells"),
 		),
-	), handleReadSheet)
+	), WithRecovery(handleReadSheet))
 }
 
 func handleReadSheet(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
